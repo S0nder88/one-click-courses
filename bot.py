@@ -1,28 +1,36 @@
 import asyncio
 import datetime
 import re
+import aiohttp
 import requests
 from urllib.parse import urlencode
 
+from aiogram.dispatcher import FSMContext, filters
 from aiogram.utils import executor
+
 from bs4 import BeautifulSoup
 
 import aiogram
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot
+from aiogram import Dispatcher
+from aiogram import types
 from aiogram.bot import api
 from aiogram.utils.exceptions import MessageToDeleteNotFound
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputFile, message_id, message
-
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputFile, \
+    message_id, message, Chat, ContentType
 from anticaptchaofficial.hcaptchaproxyless import *
 from sqlite import UserDB, CourseDB, RequestDB
 
 import config
+# import utils
+# from utils import check_balance
 
 bot = Bot(token=config.BOT_TOKEN, parse_mode=types.ParseMode.HTML)
-dp = Dispatcher(bot, storage=MemoryStorage())
-CAPTCHA_API_KEY = "API KEY"
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
+API_KEY = ""
 
 #  инициализируем базу данных
 user_db = UserDB('swdatabase.db')
@@ -33,129 +41,160 @@ request_db = RequestDB('swdatabase.db')
 # ====================================== ПРИВЕТСВИЕ ===================================================
 # =====================================================================================================
 session = requests.Session()
-
 admins = [839490080]
-
 courses_per_day = {}
 
 
-# Определяем функцию для обработки команды /alerts
+# =====================================================================================================
+# ====================================== ПРОВЕРКА БАЛАНСА =============================================
+# =====================================================================================================
+async def get_balance(API_KEY):
+    url = 'https://api.anti-captcha.com/getBalance'
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+    data = {'clientKey': API_KEY}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data['balance']
+            else:
+                return None
+
+
+async def send_notification(bot: Bot, balance):
+    text = f"<b>⚠️ Внимание! Чуваки, пора платить решалам!</b>\n<b>➖ Баланс:</b> <code>{balance}</code>$!"
+    await bot.send_message(chat_id='-834856996', text=text)
+
+
+async def check_balance(bot: Bot):
+    while True:
+        balance = await get_balance(API_KEY)
+        print(balance)
+        if balance is not None and balance <= 1:
+            await send_notification(bot, balance)
+            break
+        await asyncio.sleep(30)
+
+
+async def on_startup(dp):
+    await bot.send_message(chat_id='-834856996', text='<b>🚀 Bot started!</b>')
+    asyncio.create_task(check_balance(bot))
+
+
+# =====================================================================================================
+# ====================================== РАССЫЛКА =====================================================
+# =====================================================================================================
+@dp.message_handler(content_types=ContentType.PHOTO)
+async def save_media_id(message: types.Message, state: FSMContext):
+    # сохраняем идентификатор медиаконтента в состоянии бота
+    await state.set_data({'media_id': message.photo[-1].file_id})
+    await message.answer('Идентификатор медиаконтента сохранен.')
+
+
 @dp.message_handler(commands=['alerts'])
 async def send_alerts(message: types.Message):
-    # Проверяем, является ли пользователь администратором
     if message.from_user.id not in admins:
-        await message.answer("Вы не являетесь администратором.")
         return
 
-    # Получаем список пользователей
     users = user_db.get_all_users()
 
-    # Получаем медиа-контент, если он есть
-    media = None
-    if message.photo:
-        media = [types.InputMediaPhoto(media=photo.file_id) for photo in message.photo]
-    elif message.video:
-        media = [types.InputMediaVideo(media=video.file_id) for video in message.video]
-    elif message.animation:
-        media = [types.InputMediaAnimation(media=animation.file_id) for animation in message.animation]
+    text = message.text.replace('/alerts ', '')
 
-    # Отправляем сообщение каждому пользователю
+    # получаем сохраненный идентификатор медиаконтента из состояния бота
+    state = dp.current_state(chat=message.chat.id, user=message.from_user.id)
+    data = await state.get_data()
+    media_id = data.get('media_id', None)
+
+    # создаем список медиа
+    media = []
+    if media_id:
+        media.append(types.InputMediaPhoto(media=media_id, caption=text))
+    else:
+        media.append(types.InputMediaDocument(media=text))
+
     for user in users:
         try:
-            if media:
-                await bot.send_media_group(chat_id=user.id, media=[types.InputMediaPhoto(media=media)],
-                                           caption=message.text[len('/alerts '):])
-            else:
-                await bot.send_message(chat_id=user.id, text=message.text[len('/alerts '):])
-
+            # отправляем медиа-контент и текст сообщения в одном сообщении
+            await bot.send_media_group(user.id, media=media)
+            # await bot.send_message(user.id, text)
+        except aiogram.utils.exceptions.BotBlocked:
+            print(f"User {user.id} has blocked the bot")
+            continue
+        except aiogram.utils.exceptions.ChatNotFound:
+            print(f"User {user.id} not found")
+            continue
         except Exception as e:
-            print(f"Failed to send message to user {user.id}: {str(e)}")
+            print(f"Error while sending message to user {user.id}: {e}")
+            continue
 
-    await message.answer(f"Рассылка завершена. Отправлено сообщений: {len(users)}")
+    await message.answer("Рассылка завершена.")
 
 
+# =====================================================================================================
+# ====================================== СТАРТ, ОБРАБОТКА МЕНЮ ========================================
+# =====================================================================================================
 @dp.message_handler(commands=['start'])
 async def start_handler(message: aiogram.types.Message):
+    user_db.create()
+    course_db.create()
+    request_db.create()
     request_db.add_request(message.from_user.id)
     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-    user_id = message.from_user.id
-    chat_id = '-1001735705501'
-    member = await bot.get_chat_member(chat_id, user_id)
-    if member.status == 'left':
-        # Если пользователь не подписан на канал, отправляем сообщение с инлайн кнопкой для подписки
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton(text='Подписаться на канал', url='https://t.me/rare_hood'))
-        keyboard.add(InlineKeyboardButton(text='🔍 Проверить подписку', callback_data='check_subscription'))
-        await message.answer(f"Для использования бота, пожалуйста, подпишитесь на канал.", reply_markup=keyboard)
-    else:
-        if not user_db.user_exist(user_id):
-            user_db.add_user(user_id)
 
-            keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-            keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-            keyboard.add(KeyboardButton('⚙️ Статистика'))
-
-            await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-                                 reply_markup=keyboard)
-
-            chatt_id = '-834856996'
-            username = message.from_user.username
-            text = f"➖ @{username} - новый пользователь"
-            await bot.send_message(chatt_id, text)
-
-        else:
-            keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-            keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-            keyboard.add(KeyboardButton('⚙️ Статистика'))
-
-            await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-                                 reply_markup=keyboard)
-
-
-@dp.callback_query_handler(lambda query: query.data == 'check_subscription')
-async def check_subscription_handler(query: types.CallbackQuery):
-    user_id = query.from_user.id
-    chat_id = '-1001735705501'
-    member = await bot.get_chat_member(chat_id, user_id)
-    if member.status == 'left':
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton(text='Подписаться на канал', url='https://t.me/rare_hood'))
-        await bot.send_message(chat_id=query.message.chat.id, text='Вы не подписаны на канал, подпишитесь, чтобы запустить бота.', reply_markup=keyboard)
-    else:
-        await bot.answer_callback_query(query.id)
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
-        except MessageToDeleteNotFound:
-            pass
-        await start_bot(query.message, user_id)
-
-
-async def start_bot(message: types.Message, user_id: int):
-    request_db.add_request(user_id)
-    await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-
-    if not user_db.user_exist(user_id):
-        user_db.add_user(user_id)
-
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-        keyboard.add(KeyboardButton('⚙️ Статистика'))
-
-        await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-                             reply_markup=keyboard)
-
-        chatt_id = '-834856996'
+    if not user_db.user_exist(message.from_user.id):
+        user_db.add_user(message.from_user.id)
         username = message.from_user.username
-        text = f"➖ @{username} - новый пользователь"
-        await bot.send_message(chatt_id, text)
+        name = f"@{username}" if username else f"{message.from_user.first_name} {message.from_user.last_name}"
+        await bot.send_message('-834856996', f"➖ {name} - новый пользователь")
 
-    else:
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-        keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-        keyboard.add(KeyboardButton('⚙️ Статистика'))
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True).add(
+        KeyboardButton('🤖 Услуги кодера'),
+        KeyboardButton('⚙️ Статистика')
+    )
+    await message.answer('👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/', reply_markup=keyboard)
 
-        await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-                             reply_markup=keyboard)
+# @dp.callback_query_handler(lambda query: query.data == 'check_subscription')
+# async def check_subscription_handler(query: types.CallbackQuery):
+#     user_id = query.from_user.id
+#     chat_id = '-1001735705501'
+#     member = await bot.get_chat_member(chat_id, user_id)
+#     if member.status == 'left':
+#         keyboard = InlineKeyboardMarkup()
+#         keyboard.add(InlineKeyboardButton(text='Подписаться на канал', url='https://t.me/rare_hood'))
+#         await bot.send_message(chat_id=query.message.chat.id, text='Вы не подписаны на канал, подпишитесь, чтобы запустить бота.', reply_markup=keyboard)
+#     else:
+#         await bot.answer_callback_query(query.id)
+#         try:
+#             await bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
+#         except MessageToDeleteNotFound:
+#             pass
+#         await start_bot(query.message, user_id)
+#
+#
+# async def start_bot(message: types.Message, user_id: int):
+#     request_db.add_request(user_id)
+#     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+#
+#     if not user_db.user_exist(user_id):
+#         user_db.add_user(user_id)
+#
+#         keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+#         keyboard.add(KeyboardButton('🤖 Услуги кодера'))
+#         keyboard.add(KeyboardButton('⚙️ Статистика'))
+#
+#         await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
+#                              reply_markup=keyboard)
+#     else:
+#         keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+#         keyboard.add(KeyboardButton('🤖 Услуги кодера'))
+#         keyboard.add(KeyboardButton('⚙️ Статистика'))
+#
+#         await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
+#                              reply_markup=keyboard)
 
 
 @dp.message_handler(lambda message: message.text == "🤖 Услуги кодера")
@@ -189,6 +228,9 @@ async def remove_message(query: types.CallbackQuery):
     await bot.delete_message(chat_id=query.message.chat.id, message_id=query.message.message_id)
 
 
+# =====================================================================================================
+# ====================================== ОБРАБОТКА ССЫЛКИ НА КУРС =====================================
+# =====================================================================================================
 async def send_wait_message(chat_id):
     message_text = '😉 Подожди, пожалуйста, сейчас я всё достану...'
     message = await bot.send_message(chat_id, message_text)
@@ -212,7 +254,7 @@ async def message_handler(message: types.Message):
         courses_per_day[user_id] = [(today, 1)]
     else:
         if courses_per_day[user_id][-1][0] == today:
-            if courses_per_day[user_id][-1][1] >= 3:
+            if courses_per_day[user_id][-1][1] >= 5:
                 await message.answer("Вы уже получили максимальное количество курсов за сегодня.")
                 return
             else:
@@ -223,7 +265,7 @@ async def message_handler(message: types.Message):
     if message.from_user and re.match(r'^https?://[\w\-\.~:/\?#\[\]@!\$&\'\(\)\*\+,;=%]+$', message.text):
         course_url = message.text
         channel_id = "-834856996"
-        message_text = f"🔥 Пользователь @{message.from_user.username} ввел ссылку на курс "
+        message_text = f"🔥 Пользователь @{message.from_user.username} ввел ссылку на курс:\n\n{course_url} "
         await bot.send_message(channel_id, message_text,)
         await send_wait_message(message.chat.id)
         course_info = course_db.get_url(course_url)
@@ -250,7 +292,7 @@ async def message_handler(message: types.Message):
                 # captcha
                 solver = hCaptchaProxyless()
                 solver.set_verbose(1)
-                solver.set_key(CAPTCHA_API_KEY)
+                solver.set_key(API_KEY)
                 solver.set_website_url('https://s1.sharewood.co/login/')
                 solver.set_website_key(site_key)
                 g_response = solver.solve_and_return_solution()
@@ -314,18 +356,22 @@ async def message_handler(message: types.Message):
                 course_db.add_link(course_url, title, download_link)
 
                 message_text = f"<b>💎 Курс доступен для скачивания 💎</b>\n\n<b>Название: {title}</b>\n\n\n<a href='{download_link}'>👉🏻 Скачать курс  </a>"
+                message_alerts = f"💎 Курс: <b>{title}</b>\n\n <b>➖ Выдан пользователю</b> @{message.from_user.username}"
                 await message.answer(message_text, parse_mode="HTML")
+                await bot.send_message(channel_id, message_alerts, parse_mode="HTML")
 
                 await message.answer("<b>▫️ Что-бы запросить новый курс - просто пришли мне ссылку</b>")
                 await message.delete()
 
                 try:
-                    next_message = await dp.bot.wait_for('message', chat_id=message.chat.id)
+                    next_message = await bot.wait_for('message', chat_id=message.chat.id)
                     course_url = next_message.text
                 except TypeError:
                     course_url = None
 
 
+
+
 # Запускаем бота
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)

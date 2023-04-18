@@ -8,6 +8,18 @@ class UserDB:
         self.connection = sqlite3.connect(swdatabase_file)
         self.cursor = self.connection.cursor()
 
+    def create(self):
+        # Создаем таблицу `users`, если ее еще нет
+        self.cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS `users` (
+                `id` INTEGER PRIMARY KEY,
+                `user_id` INTEGER NOT NULL UNIQUE
+            )
+            '''
+        )
+        self.connection.commit()
+
     def user_exist(self, user_id):
         """Проверяем, есть ли юзер в базе"""
         with self.connection:
@@ -44,10 +56,28 @@ class CourseDB:
         self.connection = sqlite3.connect(swdatabase_file)
         self.cursor = self.connection.cursor()
 
-    def add_link(self, link, title, download_link):
-        with self.connection:
-            result = self.cursor.execute("INSERT INTO `course` (`link`, `title`, `download_link`) VALUES (?, ?, ?)", (link, title, download_link))
-            self.connection.commit()
+    def create(self):
+        # Создаем таблицу `course`, если ее еще нет
+        self.cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS `course` (
+                `id` INTEGER PRIMARY KEY,
+                `link` TEXT NOT NULL UNIQUE,
+                `title` TEXT NOT NULL,
+                `download_link` TEXT NOT NULL
+            )
+            '''
+        )
+        self.connection.commit()
+
+    def add_link(self, course_url, title, download_link):
+        try:
+            with self.connection:
+                self.cursor.execute("INSERT INTO `course` (`link`, `title`, `download_link`) VALUES (?, ?, ?)",
+                                    (course_url, title, download_link))
+                self.connection.commit()
+        except Exception as e:
+            print(f"Error while inserting data: {e}")
 
     def get_course_count(self):
         with self.connection:
@@ -60,11 +90,24 @@ class CourseDB:
             return result.fetchone()
 
 
-
 class RequestDB:
     def __init__(self, swdatabase_file):
         self.connection = sqlite3.connect(swdatabase_file)
         self.cursor = self.connection.cursor()
+
+    def create(self):
+        # Создаем таблицу `requests`, если ее еще нет
+        self.cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS `requests` (
+                `id` INTEGER PRIMARY KEY,
+                `request_date` TEXT NOT NULL,
+                `request_time` TEXT NOT NULL,
+                `user_id` INTEGER NOT NULL
+            )
+            '''
+        )
+        self.connection.commit()
 
     def add_request(self, user_id):
         """Добавляем запрос"""
