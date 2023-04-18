@@ -157,51 +157,12 @@ async def start_handler(message: aiogram.types.Message):
     )
     await message.answer('👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/', reply_markup=keyboard)
 
-# @dp.callback_query_handler(lambda query: query.data == 'check_subscription')
-# async def check_subscription_handler(query: types.CallbackQuery):
-#     user_id = query.from_user.id
-#     chat_id = '-1001735705501'
-#     member = await bot.get_chat_member(chat_id, user_id)
-#     if member.status == 'left':
-#         keyboard = InlineKeyboardMarkup()
-#         keyboard.add(InlineKeyboardButton(text='Подписаться на канал', url='https://t.me/rare_hood'))
-#         await bot.send_message(chat_id=query.message.chat.id, text='Вы не подписаны на канал, подпишитесь, чтобы запустить бота.', reply_markup=keyboard)
-#     else:
-#         await bot.answer_callback_query(query.id)
-#         try:
-#             await bot.delete_message(chat_id=chat_id, message_id=query.message.message_id)
-#         except MessageToDeleteNotFound:
-#             pass
-#         await start_bot(query.message, user_id)
-#
-#
-# async def start_bot(message: types.Message, user_id: int):
-#     request_db.add_request(user_id)
-#     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-#
-#     if not user_db.user_exist(user_id):
-#         user_db.add_user(user_id)
-#
-#         keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-#         keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-#         keyboard.add(KeyboardButton('⚙️ Статистика'))
-#
-#         await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-#                              reply_markup=keyboard)
-#     else:
-#         keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-#         keyboard.add(KeyboardButton('🤖 Услуги кодера'))
-#         keyboard.add(KeyboardButton('⚙️ Статистика'))
-#
-#         await message.answer("👋 Пришли ссылку на курс с этого сайта:\n\nhttps://s1.sharewood.co/",
-#                              reply_markup=keyboard)
-
 
 @dp.message_handler(lambda message: message.text == "🤖 Услуги кодера")
 async def coder_buttons(message: types.Message):
     await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
     buttons_text = message.text
-    text = "<b>🦾 Понравился бот?</b> Может у тебя есть гениальная идея, но ты не знаешь как ее реализовать?\nТогда ты по адресу :)\n\n▫️ Мы поможем тебе перенести твои теоретические задумки на практический результат!\n\n➖ Создание телеграмм ботов\n➖ Различного вида сайты: лендинг, магазин, корпоративный сайт и то, что вроде как запрещено, но не для нас\n➖ Десктопный софт (чекеры, сортеры)\n➖ Мы привносим в вашу идею свой обширный опыт!\n\n▫️ 95% клиентов, которые работали со мной когда-либо - продолжают работать и по сей день, это говорит о многом!\n◾️ Пишите, обсудим детальнее вашу задачу и найдём лучший вариант!\n🔥 Связь: @Rare_c0de\n📍Канал: @rare_hood "
+    text = "<b>🦾 Понравился бот?</b> Может у тебя есть гениальная идея, но ты не знаешь как ее реализовать?\nТогда ты по адресу :)\n\n▫️ Мы поможем тебе перенести твои теоретические задумки на практический результат!\n\n➖ Создание телеграмм ботов\n➖ Различного вида сайты: лендинг, магазин, корпоративный сайт и то, что вроде как запрещено, но не для нас\n➖ Десктопный софт (чекеры, сортеры)\n➖ Мы привносим в вашу идею свой обширный опыт!\n\n▫️ 95% клиентов, которые работали со мной когда-либо - продолжают работать и по сей день, это говорит о многом!\n◾️ Пишите, обсудим детальнее вашу задачу и найдём лучший вариант!\n🔥 Связь: @username\n📍Канал: @chanelname "
     photo_path = './hood_rare.jpg'
     photo = open(photo_path, 'rb')
     markup = InlineKeyboardMarkup()
